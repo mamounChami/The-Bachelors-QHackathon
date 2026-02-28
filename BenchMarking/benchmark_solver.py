@@ -12,23 +12,31 @@ Runs 4 experiments and generates plots in BenchMarking/plots_solvers/ :
 Usage:
   python BenchMarking/benchmark_solvers.py
 """
-
+import sys
 import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+import os
+import sys
 import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
 warnings.filterwarnings("ignore")
+print(os.getcwd())
+
+import os
+import sys
+
 
 # ── IMPORTANT: use dummy dataset for speed ────────────────────────────────
-from dataset_dummy import generate_dataset, print_dataset
-
-from classical_solver import (
+from dataset_dummy import *
+from Engines.classical_solver import (
     brute_force, simulated_annealing, greedy,
-    print_comparison, approx_ratio,
+    print_comparison, approx_ratio
 )
-from quantum_solver import run_qaoa
+
+from Engines.quantum_solver import run_qaoa
 
 
 # ---------------------------------------------------------------------------
