@@ -53,7 +53,7 @@ from qiskit_aer import AerSimulator
 from qiskit_aer.primitives import SamplerV2 as AerSampler
 from scipy.optimize import minimize
 
-from dataset import ReinsuranceDataset, generate_dataset, print_dataset
+from dataset_dummy import ReinsuranceDataset, generate_dataset, print_dataset
 from classical_solver import SolverResult
 
 warnings.filterwarnings("ignore")

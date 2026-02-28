@@ -19,8 +19,7 @@ from dataclasses import dataclass
 from itertools import product
 from typing import Optional
 
-from dataset import ReinsuranceDataset, generate_dataset, print_dataset
-
+from dataset_dummy import ReinsuranceDataset, generate_dataset, print_dataset
 
 # ---------------------------------------------------------------------------
 # Shared result container
