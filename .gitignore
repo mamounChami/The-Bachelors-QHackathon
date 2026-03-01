@@ -1,1 +1,3 @@
-./DataSet/natural_disasters_cleaned.csv
+./__pycache__/
+./DataSet/__pycache__/
+./Engines/__pycache__/
