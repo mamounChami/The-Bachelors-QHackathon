@@ -98,15 +98,6 @@ def brute_force(r_values, premiums, total_budget):
     # Identify which project indices were chosen (1-based for readability)
     chosen_projects = np.where(best_combination == 1)[0]
     
-<<<<<<< HEAD
-=======
-    print(f"--- Optimization Result ---")
-    print(f"Projects Selected: {chosen_projects}")
-    print(f"Total Profit: {best_profit:.2f}")
-    print(f"Budget Used: {best_cost:.2f} / {total_budget}")
-    print(f"Remaining Budget: {total_budget - best_cost:.2f}")
-    
->>>>>>> 7bdfa5bcbb565b4d8bf451738e68d9f5f0fb2908
     return best_combination, best_profit
 
 # ---------------------------------------------------------------------------
