@@ -34,9 +34,7 @@ We assume:
 
 We define binary decision variables:
 
-\[
-x_i \in \{0,1\}
-\]
+$$ x_i \in \{0,1\} $$
 
 where each variable corresponds to one reinsurance contract.
 
