@@ -70,41 +70,41 @@ def _make_result(
 import numpy as np
 import time
 
-def brute_force(N, r, premiums, total_budget):
-
-    start = time.time()
-
-    best_score = -np.inf
-    best_x = None
-
-    # iterate over all 2^N combinations
-    for i in range(2 ** N):
-
-        # convert integer to binary vector of length N
-        x = np.array(list(np.binary_repr(i, width=N)), dtype=int)
-
-        # compute total cost
-        total_cost = np.dot(premiums, x)
-
-        # check budget constraint
-        if total_cost <= total_budget:
-
-            score = np.dot(r, x)
-
-            if score > best_score:
-                best_score = score
-                best_x = x
-
-    runtime = time.time() - start
-
-    return best_x, best_score, runtime
+def brute_force(r_values, premiums, total_budget):
+    N = r_values.shape[1]
+    
+    # 1. Generate all 2^N - 1 combinations
+    numbers = np.arange(1, 2**N, dtype=np.uint32)
+    combinations = ((numbers[:, None] & (1 << np.arange(N)[::-1])) > 0).astype(int).T
+    
+    # 2. Calculate total profit and total cost for EVERY combination
+    all_profits = np.dot(r_values, combinations).flatten()
+    all_costs = np.dot(premiums, combinations).flatten()
+    
+    # 3. Filter combinations that are over budget
+    valid_mask = all_costs <= total_budget
+    
+    if not np.any(valid_mask):
+        return None, "No valid combination within budget", 0
+    
+    # 4. Find the combination with the highest profit
+    best_relative_idx = np.argmax(all_profits[valid_mask])
+    original_idx = np.where(valid_mask)[0][best_relative_idx]
+    
+    best_combination = combinations[:, original_idx]
+    best_profit = all_profits[original_idx]
+    best_cost = all_costs[original_idx]
+    
+    # Identify which project indices were chosen (1-based for readability)
+    chosen_projects = np.where(best_combination == 1)[0]
+    
+    return best_combination, best_profit
 
 # ---------------------------------------------------------------------------
 # 2. Simulated Annealing
 # ---------------------------------------------------------------------------
 
 def simulated_annealing(
-    N,
     r,
     premiums,
     total_budget,
@@ -118,105 +118,117 @@ def simulated_annealing(
     """
     Simulated Annealing for:
 
-    max r^T x
-    s.t. premiums^T x ≤ total_budget
+      max r^T x
+      s.t. premiums^T x ≤ total_budget
 
     Uses soft penalty:
-    f(x) = r^T x − λ * max(0, premiums^T x − B)^2
+      f(x) = r^T x − λ * max(0, premiums^T x − B)^2
+
+    Robust to r being shape (N,) or (1,N).
     """
 
-    r = np.array(r, dtype=float)
-    premiums = np.array(premiums, dtype=float)
+    # ---- FIX: force 1D vectors ----
+    r = np.asarray(r, dtype=float).reshape(-1)           # (N,)
+    premiums = np.asarray(premiums, dtype=float).reshape(-1)  # (N,)
+    N = r.size
 
     rng = random.Random(seed)
 
     # Penalised objective (higher is better)
     def objective(x):
-        cost = premiums @ x
-        risk = r @ x
+        cost = float(np.dot(premiums, x))               # scalar
+        score = float(np.dot(r, x))                     # scalar
         violation = max(0.0, cost - total_budget)
-        return risk - lambda_penalty * violation**2
+        return score - lambda_penalty * (violation ** 2)
 
     # --- Initial feasible solution ---
-    x_cur = np.zeros(N)
+    x_cur = np.zeros(N, dtype=int)
     indices = list(range(N))
     rng.shuffle(indices)
 
+    cur_cost = 0.0
     for i in indices:
-        if premiums[i] + premiums @ x_cur <= total_budget:
+        if cur_cost + premiums[i] <= total_budget:
             x_cur[i] = 1
+            cur_cost += premiums[i]
 
-    f_cur = objective(x_cur)
+    f_cur = float(objective(x_cur))
 
     # Track best feasible solution
     best_x = x_cur.copy()
-    best_f = f_cur if premiums @ best_x <= total_budget else -np.inf
+    best_f = f_cur if float(np.dot(premiums, best_x)) <= total_budget else -np.inf
 
     T = T_init
 
     for _ in range(max_iter):
-
         if T < T_min:
             break
 
-    # --- Flip random bit ---
+        # --- Flip random bit ---
         flip_idx = rng.randint(0, N - 1)
         x_new = x_cur.copy()
         x_new[flip_idx] = 1 - x_new[flip_idx]
 
-        f_new = objective(x_new)
-        delta = f_new - f_cur
+        f_new = float(objective(x_new))
+        delta = f_new - f_cur  # now guaranteed scalar
 
         # --- Metropolis criterion ---
-        if delta > 0 or rng.random() < math.exp(delta / T):
+        if delta > 0.0 or rng.random() < math.exp(delta / T):
             x_cur = x_new
             f_cur = f_new
 
-        # Update best feasible
-            if premiums @ x_cur <= total_budget and f_cur > best_f:
+            # Update best feasible
+            if float(np.dot(premiums, x_cur)) <= total_budget and f_cur > best_f:
                 best_f = f_cur
                 best_x = x_cur.copy()
 
         T *= cooling
 
-    best_score = r @ best_x
-
+    best_score = float(np.dot(r, best_x))
     return best_x, best_score
-
 
 # ---------------------------------------------------------------------------
 # 3. Greedy Heuristic
 # ---------------------------------------------------------------------------
 
-def greedy(N, r, premiums, total_budget):
+import numpy as np
+
+def greedy(r, premiums, total_budget):
     """
-    Returns
-    x : np.ndarray
-    Selected binary vector
-    total_risk : float
-    Achieved objective value
+    Greedy for:
+      max r^T x
+      s.t. premiums^T x <= total_budget
+
+    Robust to r being shape (N,) or (1,N).
+    Returns:
+      x (N,) binary vector
+      total_score (float)
     """
 
-    r = np.array(r, dtype=float)
-    premiums = np.array(premiums, dtype=float)
+    # ---- FIX: force 1D ----
+    r = np.asarray(r, dtype=float).reshape(-1)              # (N,)
+    premiums = np.asarray(premiums, dtype=float).reshape(-1) # (N,)
+    N = r.size
 
-    # Compute efficiency ratio r_i / c_i
-    ratios = r / premiums
+    # Avoid division by zero (just in case)
+    premiums_safe = np.where(premiums == 0.0, 1e-12, premiums)
 
-    # Sort indices in descending order of ratio
-    order = np.argsort(-ratios)
+    # Efficiency ratio
+    ratios = r / premiums_safe                              # (N,)
 
-    x = np.zeros(N)
-    remaining_budget = total_budget
+    # Sort indices descending
+    order = np.argsort(-ratios)                             # (N,)
+
+    x = np.zeros(N, dtype=int)
+    remaining_budget = float(total_budget)
 
     for i in order:
         if premiums[i] <= remaining_budget:
             x[i] = 1
             remaining_budget -= premiums[i]
 
-    total_risk = r @ x
-
-    return x, total_risk
+    total_score = float(np.dot(r, x))
+    return x, total_score
 
 
 # ---------------------------------------------------------------------------
