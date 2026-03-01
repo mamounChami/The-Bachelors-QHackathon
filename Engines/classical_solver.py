@@ -67,45 +67,37 @@ def _make_result(
 # 1. Brute-Force Exact Solver
 # ---------------------------------------------------------------------------
 
-def brute_force(data: ReinsuranceDataset) -> SolverResult:
-    """
-    Exact solver via exhaustive enumeration.
+import numpy as np
+import time
 
-    Iterates all 2^n binary strings and returns the one that:
-      - satisfies the budget constraint  (cost ≤ B)
-      - maximises total risk reduction
+def brute_force(N, r, premiums, total_budget):
 
-    Time complexity  : O(2^n · n)
-    Space complexity : O(n)
-    Feasible for     : n ≤ ~20  (2^20 ≈ 1 M  iterations ≈ <1 s)
+    start = time.time()
 
-    Returns
-    -------
-    SolverResult with the globally optimal solution.
-    """
-    t0 = time.perf_counter()
+    best_score = -np.inf
+    best_x = None
 
-    n = data.n
-    best_risk = -1.0
-    best_bs   = "0" * n
+    # iterate over all 2^N combinations
+    for i in range(2 ** N):
 
-    # Iterate every integer from 0 to 2^n − 1
-    # Each integer encodes a subset via its binary representation
-    for mask in range(2 ** n):
-        # Decode mask into a numpy vector x ∈ {0,1}^n
-        x = np.array([(mask >> i) & 1 for i in range(n)], dtype=float)
+        # convert integer to binary vector of length N
+        x = np.array(list(np.binary_repr(i, width=N)), dtype=int)
 
-        cost = float(data.costs @ x)
-        if cost > data.budget:          # prune infeasible solutions
-            continue
+        # compute total cost
+        total_cost = np.dot(premiums, x)
 
-        risk = float(data.risks @ x)
-        if risk > best_risk:
-            best_risk = risk
-            best_bs   = "".join(str(int(x[i])) for i in range(n))
+        # check budget constraint
+        if total_cost <= total_budget:
 
-    return _make_result("BruteForce", best_bs, data, t0)
+            score = np.dot(r, x)
 
+            if score > best_score:
+                best_score = score
+                best_x = x
+
+    runtime = time.time() - start
+
+    return best_x, best_score, runtime
 
 # ---------------------------------------------------------------------------
 # 2. Simulated Annealing
