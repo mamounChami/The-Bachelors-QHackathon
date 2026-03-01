@@ -41,17 +41,18 @@ where H_B = Σ_i X_i is the transverse-field mixer Hamiltonian.
 """
 
 import warnings
-import time
 import numpy as np
-from itertools import product
 from typing import Tuple
 
 # ── Qiskit imports ────────────────────────────────────────────────────────
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, transpile
 from qiskit.primitives import StatevectorSampler
 from qiskit_aer import AerSimulator
 from qiskit_aer.primitives import SamplerV2 as AerSampler
 from scipy.optimize import minimize
+from qiskit.circuit.library import TwoLocal
+from qiskit.quantum_info import SparsePauliOp
+from qiskit.primitives import StatevectorEstimator
 
 warnings.filterwarnings("ignore")
 
@@ -262,7 +263,7 @@ def run_qaoa(
     premiums,
     total_budget,
     p: int = 1,
-    lam: float | None = None,
+    lam: float = 1.0,
     shots: int = 4096,
     verbose: bool = True,
 ) -> Tuple[np.ndarray, float, float, bool]:
@@ -283,15 +284,6 @@ def run_qaoa(
     c = np.asarray(premiums, dtype=float).reshape(-1)
     B = float(total_budget)
     n = r.size
-
-    if c.size != n:
-        raise ValueError("r and premiums must have same length")
-
-    # --- auto λ if not provided ---
-    if lam is None:
-        lam = float(np.max(np.abs(r))) / float(np.min(c)) + 1.0
-        if verbose:
-            print(f"  Auto-selected λ = {lam:.3f}")
 
     # --- Step 1: Build QUBO ---
     if verbose:
@@ -314,7 +306,6 @@ def run_qaoa(
 
         qc = build_qaoa_circuit(J, h, p, gamma_k, beta_k)
 
-        from qiskit import transpile
         qc_t   = transpile(qc, backend, optimization_level=0)
         job    = backend.run(qc_t, shots=512)
         counts = job.result().get_counts()
@@ -356,7 +347,6 @@ def run_qaoa(
 
     qc_opt = build_qaoa_circuit(J, h, p, gamma_opt, beta_opt)
 
-    from qiskit import transpile
     qc_t   = transpile(qc_opt, backend, optimization_level=0)
     job    = backend.run(qc_t, shots=shots)
     counts = job.result().get_counts()

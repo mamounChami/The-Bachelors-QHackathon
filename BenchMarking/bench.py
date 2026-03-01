@@ -18,7 +18,7 @@ from Engines.quantum_solver import run_qaoa
 # BENCHMARK
 # ------------------------------------------------------
 
-Ns = np.arange(6, 26)   
+Ns = np.arange(6, 21)   
 
 mean_scores_brute = []
 runtimes_brute = []
@@ -29,17 +29,17 @@ runtimes_sa = []
 mean_scores_greedy = []
 runtimes_greedy = []
 
-runtimes_quantum = []
-mean_scores_quantum = []
+runtimes_qaoa = []
+mean_scores_qaoa = []
 
 
 for N in Ns:
-    total_budget = 4e6
+    total_budget = 4e6*N/2
     # POV : insured, not reinsurer 
     # ----- Classical -----
     props = np.random.uniform(0,1, N)
     thresholds =  np.random.uniform(2e8, 5e8, N)
-    premiums =  np.random.uniform(1e6, 2e6, N)
+    premiums =  np.random.uniform(1.5e6, 2e6, N)
     r =  generate_N(N, props, thresholds, premiums)
     scale_r = np.max(np.abs(r))
     scale_c = np.max(np.abs(premiums))
@@ -49,15 +49,13 @@ for N in Ns:
     c_s = premiums / scale_c
     B_s = total_budget / scale_c
 
-    start = time.perf_counter()
-    if N <= 18:
-        x, score = brute_force(r_s, c_s, B_s)
-    else:
-        x, score = (np.zeros(N, dtype=int), 0.0)
-    end = time.perf_counter()
 
+    start = time.perf_counter()
+    x, score = brute_force(r_s, c_s, B_s)
+    end = time.perf_counter()
     runtimes_brute.append(end - start)
     mean_scores_brute.append(-score)
+
 
     start = time.perf_counter()
     x, score = simulated_annealing(r_s, c_s, B_s)
@@ -74,19 +72,19 @@ for N in Ns:
     mean_scores_greedy.append(-score)
 
 
-    # ----- Quantum -----
+    # ----- QAOA -----
     start = time.perf_counter()
     x, score, _ = run_qaoa(r = r_s,
     premiums = c_s,
     total_budget = B_s,
     p = 1,
-    lam = 1,
-    shots = 4096,
+    lam = 1.0,
+    shots = 2048,
     verbose= True)
     end = time.perf_counter()
 
-    runtimes_quantum.append(end - start)
-    mean_scores_quantum.append(-score)
+    runtimes_qaoa.append(end - start)
+    mean_scores_qaoa.append(-score)
 
 print("Benchmark complete.")
 
@@ -97,7 +95,7 @@ plt.plot(Ns, mean_scores_sa, label="sa")
 plt.plot(Ns, mean_scores_greedy, label="greedy")
 
 
-plt.plot(Ns, mean_scores_quantum, label="Quantum")
+plt.plot(Ns, mean_scores_qaoa, label="QAOA")
 plt.xlabel("Number of Policies (N)")
 plt.ylabel("Mean normalized r")
 plt.title("Mean Score vs N")
@@ -112,38 +110,9 @@ plt.plot(Ns, runtimes_sa, label="sa")
 plt.plot(Ns, runtimes_greedy, label="greedy")
 
 
-plt.plot(Ns, runtimes_quantum, label="Quantum")
+plt.plot(Ns, runtimes_qaoa, label="QAOA")
 plt.xlabel("Number of Policies (N)")
 plt.ylabel("Runtime (seconds)")
 plt.title("Runtime Comparison")
 plt.legend()
 plt.show()
-
-# Avoid zero runtimes
-eps = 1e-12
-runtimes_brute = np.array(runtimes_brute) + eps
-runtimes_sa = np.array(runtimes_sa) + eps
-runtimes_greedy = np.array(runtimes_greedy) + eps
-
-runtimes_quantum = np.array(runtimes_quantum) + eps
-
-logN = np.log(Ns)
-logT_brute = np.log(runtimes_brute)
-logT_sa = np.log(runtimes_sa)
-logT_greedy = np.log(runtimes_greedy)
-
-logT_quantum = np.log(runtimes_quantum)
-
-# Linear regression slope
-slope_brute = np.polyfit(logN, logT_brute, 1)[0]
-slope_sa = np.polyfit(logN, logT_sa, 1)[0]
-slope_greedy = np.polyfit(logN, logT_greedy, 1)[0]
-
-slope_quantum = np.polyfit(logN, logT_quantum, 1)[0]
-
-print("Estimated complexity:")
-print(f"Classical ≈ O(N^{slope_brute:.2f})")
-print(f"Classical ≈ O(N^{slope_sa:.2f})")
-print(f"Classical ≈ O(N^{slope_greedy:.2f})")
-
-print(f"Quantum   ≈ O(N^{slope_quantum:.2f})")
