@@ -17,40 +17,66 @@ from Engines.classical_solver import (
 # BENCHMARK
 # ------------------------------------------------------
 
-Ns = np.arange(2, 51)   
+Ns = np.arange(6, 19)   
 
-mean_scores_classical = []
-mean_scores_quantum = []
+mean_scores_brute = []
+runtimes_brute = []
 
-runtimes_classical = []
+mean_scores_sa = []
+runtimes_sa = []
+
+mean_scores_greedy = []
+runtimes_greedy = []
+
 runtimes_quantum = []
-
+mean_scores_quantum = []
 for N in Ns:
+    total_budget = 4e6
     # POV : insured, not reinsurer 
     # ----- Classical -----
-    start = time.perf_counter()
     props = np.random.uniform(0,1, N)
     thresholds =  np.random.uniform(2e8, 5e8, N)
     premiums =  np.random.uniform(1e6, 2e6, N)
-
     r = - generate_N(N, props, thresholds, premiums)
+
+    start = time.perf_counter()
+    x, score = brute_force(r, premiums, total_budget)
     end = time.perf_counter()
 
-    runtimes_classical.append(end - start)
-    mean_scores_classical.append(np.mean(r))
+    runtimes_brute.append(end - start)
+    mean_scores_brute.append(score)
+
+    start = time.perf_counter()
+    x, score = simulated_annealing(r, premiums, total_budget)
+    end = time.perf_counter()
+
+    runtimes_sa.append(end - start)
+    mean_scores_sa.append(score)
+
+    start = time.perf_counter()
+    x, score = greedy(r, premiums, total_budget)
+    end = time.perf_counter()
+
+    runtimes_greedy.append(end - start)
+    mean_scores_greedy.append(score)
+
 
     # ----- Quantum -----
     start = time.perf_counter()
     end = time.perf_counter()
 
     runtimes_quantum.append(end - start)
-    mean_scores_quantum.append(np.mean(r))
+    mean_scores_quantum.append(0)
 
 print("Benchmark complete.")
 
 # ---- Mean Score vs N ----
 plt.figure()
-plt.plot(Ns, mean_scores_classical, label="Classical")
+plt.plot(Ns, mean_scores_brute, label="brute force")
+plt.plot(Ns, mean_scores_sa, label="sa")
+plt.plot(Ns, mean_scores_greedy, label="greedy")
+
+
 plt.plot(Ns, mean_scores_quantum, label="Quantum")
 plt.xlabel("Number of Policies (N)")
 plt.ylabel("Mean normalized r")
@@ -61,7 +87,11 @@ plt.show()
 
 # ---- Runtime vs N ----
 plt.figure()
-plt.plot(Ns, runtimes_classical, label="Classical")
+plt.plot(Ns, runtimes_brute, label="brute force")
+plt.plot(Ns, runtimes_sa, label="sa")
+plt.plot(Ns, runtimes_greedy, label="greedy")
+
+
 plt.plot(Ns, runtimes_quantum, label="Quantum")
 plt.xlabel("Number of Policies (N)")
 plt.ylabel("Runtime (seconds)")
@@ -71,17 +101,29 @@ plt.show()
 
 # Avoid zero runtimes
 eps = 1e-12
-runtimes_classical = np.array(runtimes_classical) + eps
+runtimes_brute = np.array(runtimes_brute) + eps
+runtimes_sa = np.array(runtimes_sa) + eps
+runtimes_greedy = np.array(runtimes_greedy) + eps
+
 runtimes_quantum = np.array(runtimes_quantum) + eps
 
 logN = np.log(Ns)
-logT_classical = np.log(runtimes_classical)
+logT_brute = np.log(runtimes_brute)
+logT_sa = np.log(runtimes_sa)
+logT_greedy = np.log(runtimes_greedy)
+
 logT_quantum = np.log(runtimes_quantum)
 
 # Linear regression slope
-slope_classical = np.polyfit(logN, logT_classical, 1)[0]
+slope_brute = np.polyfit(logN, logT_brute, 1)[0]
+slope_sa = np.polyfit(logN, logT_sa, 1)[0]
+slope_greedy = np.polyfit(logN, logT_greedy, 1)[0]
+
 slope_quantum = np.polyfit(logN, logT_quantum, 1)[0]
 
 print("Estimated complexity:")
-print(f"Classical ≈ O(N^{slope_classical:.2f})")
+print(f"Classical ≈ O(N^{slope_brute:.2f})")
+print(f"Classical ≈ O(N^{slope_sa:.2f})")
+print(f"Classical ≈ O(N^{slope_greedy:.2f})")
+
 print(f"Quantum   ≈ O(N^{slope_quantum:.2f})")
