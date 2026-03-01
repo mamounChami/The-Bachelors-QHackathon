@@ -44,21 +44,21 @@ for N in Ns:
     end = time.perf_counter()
 
     runtimes_brute.append(end - start)
-    mean_scores_brute.append(score)
+    mean_scores_brute.append(-score)
 
     start = time.perf_counter()
     x, score = simulated_annealing(r, premiums, total_budget)
     end = time.perf_counter()
 
     runtimes_sa.append(end - start)
-    mean_scores_sa.append(score)
+    mean_scores_sa.append(-score)
 
     start = time.perf_counter()
     x, score = greedy(r, premiums, total_budget)
     end = time.perf_counter()
 
     runtimes_greedy.append(end - start)
-    mean_scores_greedy.append(score)
+    mean_scores_greedy.append(-score)
 
 
     # ----- Quantum -----
