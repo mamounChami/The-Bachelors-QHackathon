@@ -1,7 +1,10 @@
 import numpy as np
+import os
 
 def generate_payment(int_threshold, prop):
-    loaded_pdf = np.load('kde_data.npz')
+    base_path = os.path.dirname(__file__)
+    file_path = os.path.join(base_path, 'kde_data.npz')
+    loaded_pdf = np.load(file_path)
     x = loaded_pdf['x_final']
     pdf = loaded_pdf['y_final_per_year']
 
@@ -16,7 +19,9 @@ def generate_payment(int_threshold, prop):
     return np.sum(output * pdf) * (x[1] - x[0])
 
 def expected_loss():
-    loaded_pdf = np.load('kde_data.npz')
+    base_path = os.path.dirname(__file__)
+    file_path = os.path.join(base_path, 'kde_data.npz')
+    loaded_pdf = np.load(file_path)
     x = loaded_pdf['x_final']
     y = loaded_pdf['y_final_per_year']
     return np.sum(x * y) * (x[1] - x[0])
