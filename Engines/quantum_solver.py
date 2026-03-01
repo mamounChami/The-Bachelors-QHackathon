@@ -53,9 +53,6 @@ from qiskit_aer import AerSimulator
 from qiskit_aer.primitives import SamplerV2 as AerSampler
 from scipy.optimize import minimize
 
-from dataset_dummy import ReinsuranceDataset, generate_dataset, print_dataset
-from classical_solver import SolverResult
-
 warnings.filterwarnings("ignore")
 
 
@@ -63,54 +60,51 @@ warnings.filterwarnings("ignore")
 # Step 1 – Build the QUBO matrix
 # ---------------------------------------------------------------------------
 
-def build_qubo(data: ReinsuranceDataset, lam: float = 5.0) -> np.ndarray:
+def build_qubo(r, premiums, total_budget, lam: float = 1.0) -> np.ndarray:
     """
-    Construct the QUBO matrix Q for the reinsurance problem.
+    Build the upper-triangular QUBO matrix Q such that:
 
-    The QUBO energy is defined as:
+        E(x) = x^T Q x     (MINIMIZE)
 
-        E(x) = x^T Q x          (we MINIMISE this)
+    corresponding to the penalized objective:
 
-    For a binary vector x ∈ {0,1}^n (note: xᵢ² = xᵢ for binary variables),
-    and using the Hamiltonian:
+        H(x) = - sum_i r_i x_i  +  lam * (sum_i c_i x_i - B)^2
 
-        H(x) = -Σ r_i x_i  +  λ (Σ c_i x_i − B)²
-
-    Expanding the penalty term:
-        λ (Σ c_i x_i − B)²
-      = λ [ Σᵢ cᵢ² xᵢ  +  2 Σ_{i<j} cᵢcⱼ xᵢxⱼ  −  2B Σᵢ cᵢ xᵢ  +  B² ]
-
-    Combining with the objective (B² is a constant, ignored in QUBO):
-
-        Q_{ii} = -r_i  +  λ cᵢ²  −  2λ B cᵢ       (diagonal — linear terms)
-        Q_{ij} = 2λ cᵢ cⱼ    for i < j             (upper triangle — quadratic terms)
-
-    By convention Q is upper-triangular so that x^T Q x covers all terms.
+    where:
+      r_i = profit/score for item i (we want to maximize sum r_i x_i)
+      c_i = premiums/costs for item i
+      B   = total_budget
 
     Parameters
     ----------
-    data : ReinsuranceDataset
-    lam  : penalty strength λ for the budget constraint
+    r : array-like, shape (N,) or (1,N)
+        Scores/profits to maximize.
+    premiums : array-like, shape (N,)
+        Costs of selecting each item.
+    total_budget : float
+        Budget constraint B.
+    lam : float
+        Penalty strength.
 
     Returns
     -------
-    Q : np.ndarray of shape (n, n)
+    Q : np.ndarray, shape (N, N)
+        Upper-triangular QUBO matrix.
     """
-    n = data.n
-    c = data.costs
-    r = data.risks
-    B = data.budget
+    r = np.asarray(r, dtype=float).reshape(-1)               # (N,)
+    c = np.asarray(premiums, dtype=float).reshape(-1)        # (N,)
+    B = float(total_budget)
 
-    Q = np.zeros((n, n))
+    n = r.size
+    Q = np.zeros((n, n), dtype=float)
 
-    # Diagonal terms: linear part of the QUBO
+    # Diagonal: -r_i + lam*c_i^2 - 2*lam*B*c_i
+    Q[np.diag_indices(n)] = -r + lam * (c ** 2) - 2.0 * lam * B * c
+
+    # Upper triangle off-diagonal: 2*lam*c_i*c_j for i<j
+    # Vectorized version:
     for i in range(n):
-        Q[i, i] = -r[i] + lam * c[i] ** 2 - 2 * lam * B * c[i]
-
-    # Off-diagonal terms: quadratic interaction between protections i and j
-    for i in range(n):
-        for j in range(i + 1, n):
-            Q[i, j] = 2 * lam * c[i] * c[j]
+        Q[i, i+1:] = 2.0 * lam * c[i] * c[i+1:]
 
     return Q
 
@@ -258,232 +252,147 @@ def build_qaoa_circuit(
 # Step 4+5 – Optimise and sample QAOA
 # ---------------------------------------------------------------------------
 
+# assumes you already have:
+# - build_qubo(r, premiums, total_budget, lam)
+# - qubo_to_ising(Q)
+# - build_qaoa_circuit(J, h, p, gamma_k, beta_k)
+
 def run_qaoa(
-    data: ReinsuranceDataset,
-    p: int    = 1,
-    lam: float = None,
+    r,
+    premiums,
+    total_budget,
+    p: int = 1,
+    lam: float | None = None,
     shots: int = 4096,
     verbose: bool = True,
-) -> SolverResult:
+) -> Tuple[np.ndarray, float, float, bool]:
     """
-    Full QAOA pipeline for the reinsurance allocation problem.
+    QAOA pipeline for:
+        maximize r^T x
+        s.t. premiums^T x <= total_budget
+    via QUBO minimization.
 
-    1. Build QUBO matrix (Section 2a)
-    2. Convert to Ising H_C = Σ J_{ij} ZZ + Σ hᵢ Zᵢ (Section 2b)
-    3. Build & optimise the QAOA circuit (Sections 3–4)
-    4. Sample the optimised circuit on Aer (Section 5)
-    5. Extract most-probable feasible bitstring (Section 6)
-
-    Parameters
-    ----------
-    data    : reinsurance problem instance
-    p       : QAOA circuit depth (number of alternating layers)
-              Higher p → better approximation, deeper circuit
-    lam     : penalty coefficient λ for budget constraint
-              If None, auto-set to max(r_i) * n / B (heuristic)
-    shots   : number of measurement shots for sampling
-    verbose : print progress if True
-
-    Returns
-    -------
-    SolverResult — decoded insurance decision from the quantum circuit.
+    Returns:
+      best_x (N,) binary vector
+      best_score (float) = r^T best_x
+      runtime_s (float)
+      feasible (bool)
     """
-    t0 = time.perf_counter()
-    n  = data.n
 
-    # ── Auto-tune λ if not provided ───────────────────────────────────────
-    # λ must be large enough so that any infeasible solution has higher
-    # energy than the best feasible one.  A safe heuristic:  λ ≥ max(r_i)/min(c_i)
+    r = np.asarray(r, dtype=float).reshape(-1)
+    c = np.asarray(premiums, dtype=float).reshape(-1)
+    B = float(total_budget)
+    n = r.size
+
+    if c.size != n:
+        raise ValueError("r and premiums must have same length")
+
+    # --- auto λ if not provided ---
     if lam is None:
-        lam = float(np.max(data.risks)) / float(np.min(data.costs)) + 1.0
+        lam = float(np.max(np.abs(r))) / float(np.min(c)) + 1.0
         if verbose:
             print(f"  Auto-selected λ = {lam:.3f}")
 
-    # ── Step 1: Build QUBO ────────────────────────────────────────────────
+    # --- Step 1: Build QUBO ---
     if verbose:
         print(f"  Building QUBO (n={n}, λ={lam:.3f}) ...")
-    Q = build_qubo(data, lam=lam)
+    Q = build_qubo(r, c, B, lam=lam)
 
-    # ── Step 2: QUBO → Ising ──────────────────────────────────────────────
+    # --- Step 2: QUBO -> Ising ---
     J, h, offset = qubo_to_ising(Q)
     if verbose:
-        print(f"  Ising Hamiltonian: {int(np.sum(J != 0)/2)} ZZ-couplings, "
-              f"{int(np.sum(h != 0))} local fields, offset={offset:.3f}")
+        zz = int(np.sum(J != 0) // 2)
+        hf = int(np.sum(h != 0))
+        print(f"  Ising: {zz} ZZ couplings, {hf} local fields, offset={offset:.3f}")
 
-    # ── Step 3+4: QAOA parameter optimisation ─────────────────────────────
-    # Objective function: expected energy ⟨ψ(β,γ)|H_C|ψ(β,γ)⟩
-    # We approximate this by evaluating the QUBO energy on all sampled bitstrings
-
-    if verbose:
-        print(f"  Optimising QAOA (p={p}) with COBYLA ...")
-
-    # Use Aer simulator for fast statevector simulation
+    # --- Step 3+4: Optimize QAOA params ---
     backend = AerSimulator(method="statevector")
 
     def qaoa_energy(params: np.ndarray) -> float:
-        """
-        Compute the expected QUBO energy for given QAOA parameters.
-        Used as the objective for the classical COBYLA optimizer.
-        """
         gamma_k = params[:p]
         beta_k  = params[p:]
 
         qc = build_qaoa_circuit(J, h, p, gamma_k, beta_k)
 
-        # Transpile and run on simulator
         from qiskit import transpile
-        qc_t    = transpile(qc, backend, optimization_level=0)
-        job     = backend.run(qc_t, shots=512)  # lower shots for speed during optimisation
-        counts  = job.result().get_counts()
+        qc_t   = transpile(qc, backend, optimization_level=0)
+        job    = backend.run(qc_t, shots=512)
+        counts = job.result().get_counts()
 
-        # Compute weighted average QUBO energy over measurement outcomes
         total_energy = 0.0
         total_shots  = sum(counts.values())
 
         for bitstring, count in counts.items():
-            # Qiskit returns bitstrings with qubit 0 on the RIGHT
-            # Reverse so index 0 corresponds to protection 0
-            bs_ordered = bitstring[::-1]
-            x = np.array([int(b) for b in bs_ordered], dtype=float)
+            bs = bitstring[::-1]  # reverse (qiskit qubit0 on right)
+            x = np.fromiter((int(b) for b in bs), dtype=float, count=n)
 
-            # Evaluate QUBO energy: E = x^T Q x
-            energy      = float(x @ Q @ x)
+            energy = float(x @ Q @ x)
             total_energy += (count / total_shots) * energy
 
-        return total_energy   # we minimise this
+        return total_energy
 
-    # Initial parameters: small random values in [0, π]
-    rng0   = np.random.default_rng(0)
-    x0     = rng0.uniform(0, np.pi, size=2 * p)
+    if verbose:
+        print(f"  Optimising QAOA (p={p}) with COBYLA ...")
 
-    # Classical optimisation loop (COBYLA — derivative-free)
-    result = minimize(
+    rng0 = np.random.default_rng(0)
+    x0 = rng0.uniform(0, np.pi, size=2 * p)
+
+    opt = minimize(
         qaoa_energy,
         x0,
         method="COBYLA",
         options={"maxiter": 200, "rhobeg": 0.5},
     )
 
-    opt_params = result.x
     if verbose:
-        print(f"  Optimisation: {result.nfev} function evaluations, "
-              f"final energy = {result.fun:.4f}")
+        print(f"  Optimisation: nfev={opt.nfev}, final energy={opt.fun:.4f}")
 
-    # ── Step 5: Sample the optimised circuit with more shots ──────────────
+    gamma_opt = opt.x[:p]
+    beta_opt  = opt.x[p:]
+
+    # --- Step 5: Sample optimized circuit ---
     if verbose:
-        print(f"  Sampling optimised circuit with {shots} shots ...")
+        print(f"  Sampling with {shots} shots ...")
 
-    gamma_opt = opt_params[:p]
-    beta_opt  = opt_params[p:]
-    qc_opt    = build_qaoa_circuit(J, h, p, gamma_opt, beta_opt)
+    qc_opt = build_qaoa_circuit(J, h, p, gamma_opt, beta_opt)
 
     from qiskit import transpile
-    qc_t    = transpile(qc_opt, backend, optimization_level=0)
-    job     = backend.run(qc_t, shots=shots)
-    counts  = job.result().get_counts()
+    qc_t   = transpile(qc_opt, backend, optimization_level=0)
+    job    = backend.run(qc_t, shots=shots)
+    counts = job.result().get_counts()
 
-    # ── Step 6: Decode the most-probable *feasible* bitstring ─────────────
-    # Sort by probability (count), pick the most probable feasible solution
+    # --- Step 6: Decode best feasible bitstring ---
     sorted_counts = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
 
-    best_bs   = "0" * n
-    best_risk = -1.0
+    best_x = np.zeros(n, dtype=int)
+    best_score = -np.inf
+    best_feas = False
+
+    def is_feasible(x_vec: np.ndarray) -> bool:
+        return float(np.dot(c, x_vec)) <= B
 
     for bitstring, count in sorted_counts:
-        bs_ordered = bitstring[::-1]    # Qiskit: qubit 0 on right → reverse
-        if len(bs_ordered) != n:
+        bs = bitstring[::-1]
+        if len(bs) != n:
             continue
+        x = np.fromiter((int(b) for b in bs), dtype=int, count=n)
 
-        risk = data.risk_of(bs_ordered)
+        score = float(np.dot(r, x))
+        feas = is_feasible(x)
 
-        # Prefer feasible solutions; among feasible, pick max risk reduction
-        if data.is_feasible(bs_ordered) and risk > best_risk:
-            best_risk = risk
-            best_bs   = bs_ordered
+        # Prefer feasible; among feasible maximize score
+        if feas and score > best_score:
+            best_x = x
+            best_score = score
+            best_feas = True
 
-    # If no feasible solution found in samples, return the most-probable one
-    if best_risk < 0:
-        best_bs = sorted_counts[0][0][::-1]
+    # If no feasible found, return most probable (still give its score)
+    if not best_feas and sorted_counts:
+        bs = sorted_counts[0][0][::-1]
+        best_x = np.fromiter((int(b) for b in bs), dtype=int, count=n)
+        best_score = float(np.dot(r, best_x))
+        best_feas = is_feasible(best_x)
         if verbose:
-            print("  ⚠️  No feasible solution found in samples — returning most probable.")
+            print("  ⚠️ No feasible found in samples — returning most probable.")
 
-    if verbose:
-        top5 = [(bs[::-1], c) for bs, c in sorted_counts[:5]]
-        print(f"  Top-5 outcomes (reversed):")
-        for bs, c in top5:
-            feas = "✓" if data.is_feasible(bs) else "✗"
-            print(f"    {bs} — {c:>5} shots  {feas}  risk={data.risk_of(bs):.1f}")
-
-    return SolverResult(
-        solver_name    = f"QAOA(p={p})",
-        bitstring      = best_bs,
-        cost           = data.cost_of(best_bs),
-        risk_reduction = data.risk_of(best_bs),
-        runtime_s      = time.perf_counter() - t0,
-        feasible       = data.is_feasible(best_bs),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Circuit inspection helpers
-# ---------------------------------------------------------------------------
-
-def circuit_stats(qc: QuantumCircuit) -> dict:
-    """Return basic circuit statistics."""
-    ops = qc.count_ops()
-    return {
-        "num_qubits"  : qc.num_qubits,
-        "depth"       : qc.depth(),
-        "gate_counts" : ops,
-        "num_gates"   : sum(ops.values()),
-    }
-
-
-def describe_qubo(Q: np.ndarray, data: ReinsuranceDataset) -> None:
-    """Print a readable description of the QUBO matrix."""
-    n = Q.shape[0]
-    print(f"\n  QUBO matrix ({n}×{n}):")
-    print("  Diagonal (linear terms):")
-    for i in range(n):
-        print(f"    Q[{i},{i}] = {Q[i,i]:+.3f}  ({data.names[i]})")
-    print("  Off-diagonal (quadratic terms):")
-    for i in range(n):
-        for j in range(i+1, n):
-            if abs(Q[i,j]) > 1e-6:
-                print(f"    Q[{i},{j}] = {Q[i,j]:+.3f}  ({data.names[i]}×{data.names[j]})")
-
-
-# ---------------------------------------------------------------------------
-# Standalone demo
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    print("=" * 68)
-    print("  QUANTUM SOLVER (QAOA) — DEMO")
-    print("=" * 68)
-
-    # Small problem for fast demo
-    data = generate_dataset(n=6, seed=42, budget_ratio=0.40)
-    print_dataset(data)
-
-    # Show QUBO
-    lam = 3.0
-    Q   = build_qubo(data, lam=lam)
-    print(f"\nQUBO matrix (λ={lam}):")
-    print(np.round(Q, 2))
-
-    # Show Ising
-    J, h, offset = qubo_to_ising(Q)
-    print(f"\nIsing h (local fields): {np.round(h, 3)}")
-    print(f"Ising offset          : {offset:.3f}")
-
-    # Show circuit (p=1, example angles)
-    gamma_ex = np.array([0.3])
-    beta_ex  = np.array([0.7])
-    qc_ex    = build_qaoa_circuit(J, h, p=1, gamma=gamma_ex, beta=beta_ex)
-    print(f"\nQAOA circuit (p=1) stats: {circuit_stats(qc_ex)}")
-    print(qc_ex.draw(output="text", fold=-1))
-
-    # Run QAOA
-    print("\nRunning QAOA optimisation (p=1) ...")
-    result = run_qaoa(data, p=1, lam=lam, shots=2048, verbose=True)
-    print(f"\n{result}")
+    return best_x, best_score, best_feas

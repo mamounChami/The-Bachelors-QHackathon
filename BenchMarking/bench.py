@@ -12,12 +12,13 @@ from DataSet.generate_N import generate_N
 from Engines.classical_solver import (
     brute_force, simulated_annealing, greedy,
 )
+from Engines.quantum_solver import run_qaoa
 
 # ------------------------------------------------------
 # BENCHMARK
 # ------------------------------------------------------
 
-Ns = np.arange(6, 19)   
+Ns = np.arange(6, 26)   
 
 mean_scores_brute = []
 runtimes_brute = []
@@ -30,6 +31,8 @@ runtimes_greedy = []
 
 runtimes_quantum = []
 mean_scores_quantum = []
+
+
 for N in Ns:
     total_budget = 4e6
     # POV : insured, not reinsurer 
@@ -38,23 +41,33 @@ for N in Ns:
     thresholds =  np.random.uniform(2e8, 5e8, N)
     premiums =  np.random.uniform(1e6, 2e6, N)
     r =  generate_N(N, props, thresholds, premiums)
+    scale_r = np.max(np.abs(r))
+    scale_c = np.max(np.abs(premiums))
+    scale_B = total_budget
+
+    r_s = r / scale_r
+    c_s = premiums / scale_c
+    B_s = total_budget / scale_c
 
     start = time.perf_counter()
-    x, score = brute_force(r, premiums, total_budget)
+    if N <= 18:
+        x, score = brute_force(r_s, c_s, B_s)
+    else:
+        x, score = (np.zeros(N, dtype=int), 0.0)
     end = time.perf_counter()
 
     runtimes_brute.append(end - start)
     mean_scores_brute.append(-score)
 
     start = time.perf_counter()
-    x, score = simulated_annealing(r, premiums, total_budget)
+    x, score = simulated_annealing(r_s, c_s, B_s)
     end = time.perf_counter()
 
     runtimes_sa.append(end - start)
     mean_scores_sa.append(-score)
 
     start = time.perf_counter()
-    x, score = greedy(r, premiums, total_budget)
+    x, score = greedy(r_s, c_s, B_s)
     end = time.perf_counter()
 
     runtimes_greedy.append(end - start)
@@ -63,10 +76,17 @@ for N in Ns:
 
     # ----- Quantum -----
     start = time.perf_counter()
+    x, score, _ = run_qaoa(r = r_s,
+    premiums = c_s,
+    total_budget = B_s,
+    p = 1,
+    lam = 1,
+    shots = 4096,
+    verbose= True)
     end = time.perf_counter()
 
     runtimes_quantum.append(end - start)
-    mean_scores_quantum.append(0)
+    mean_scores_quantum.append(-score)
 
 print("Benchmark complete.")
 
