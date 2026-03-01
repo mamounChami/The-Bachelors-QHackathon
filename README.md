@@ -4,7 +4,7 @@ We study the **Reinsurance Allocation Optimization** problem.
 
 An insurer must decide which reinsurance contracts to purchase in order to reduce exposure to catastrophic losses while respecting a strict budget constraint.
 
-This project reformulates the problem as a **Constrained Binary Optimization (CBO)** problem, then converts it into a **Quadratic Unconstrained Binary Optimization (QUBO)** model in order to solve it using both classical algorithms and quantum-inspired methods (QAOA).
+This project reformulates the problem as a **Constrained Binary Optimization (CBO)** problem, then converts it into a **Quadratic Unconstrained Binary Optimization (QUBO)** model to solve it using both classical algorithms and quantum-inspired methods (QAOA).
 
 ---
 
@@ -16,17 +16,17 @@ To mitigate extreme tail risks, the company can purchase reinsurance contracts.
 
 Each contract:
 
-- Reduces exposure to large losses
-- Has a fixed premium cost
-- Is either purchased or not (binary decision)
+- Reduces exposure to large losses  
+- Has a fixed premium cost  
+- Is either purchased or not (binary decision)  
 
 Because the insurer operates under a limited reinsurance budget, it cannot purchase all contracts. Therefore, it must select an optimal subset that maximizes expected risk reduction while respecting the budget constraint.
 
 We assume:
 
-- Binary decision variables
-- Linear expected value aggregation
-- Budget constraint enforced via penalty in the QUBO formulation
+- Binary decision variables  
+- Linear expected value aggregation  
+- Budget constraint enforced via penalty in the QUBO formulation  
 
 ---
 
@@ -34,18 +34,14 @@ We assume:
 
 We define binary decision variables:
 
-$$ x_i \in \{0,1\} $$
+xᵢ ∈ {0,1}
 
-where each variable corresponds to one reinsurance contract.
-
-- \( x_i = 1 \) → contract *i* is purchased  
-- \( x_i = 0 \) → contract *i* is not purchased  
+- xᵢ = 1 → contract i is purchased  
+- xᵢ = 0 → contract i is not purchased  
 
 If there are **N contracts**, the solution vector is:
 
-\[
-x \in \{0,1\}^N
-\]
+x ∈ {0,1}ᴺ
 
 In the quantum formulation, the number of qubits required is equal to **N**.
 
@@ -57,22 +53,22 @@ We use the **Natural Disasters Emergency Events Database**.
 
 Each record contains:
 
-- Country
-- Year
-- Number of disaster occurrences
-- Total loss (inflation-adjusted USD)
+- Country  
+- Year  
+- Number of disaster occurrences  
+- Total loss (inflation-adjusted USD)  
 
 We filter the dataset by:
 
-- European countries
-- Weather-related disasters
-- Loss per event between **100M and 500M USD**
+- European countries  
+- Weather-related disasters  
+- Loss per event between 100M and 500M USD  
 
 From the filtered dataset:
 
-1. We compute a **histogram of event losses**
-2. Convert it into a **probability density function (PDF)**
-3. Estimate the annual expected frequency of catastrophic events
+1. We compute a histogram of event losses  
+2. Convert it into a probability density function (PDF)  
+3. Estimate the annual expected frequency of catastrophic events  
 
 We assume only a fraction of total events impact our insurer portfolio, leading to an adjusted PDF used in expected loss calculations.
 
@@ -82,80 +78,68 @@ We assume only a fraction of total events impact our insurer portfolio, leading 
 
 Each policy is modeled using:
 
-- A threshold \( T_i \)
-- A coverage proportion \( p_i \)
-- A premium cost \( c_i \)
+- Threshold Tᵢ  
+- Coverage proportion pᵢ  
+- Premium cost cᵢ  
 
-The payout function behaves as follows:
+The payout behaves as follows:
 
-- If loss < threshold → full coverage  
-- If loss ≥ threshold → proportional coverage  
+- If loss < Tᵢ → full coverage  
+- If loss ≥ Tᵢ → proportional coverage  
 - Outside [100M, 500M] → no payout  
 
-The expected payout for policy \( i \) is computed as:
+The expected payout for policy i is:
 
-\[
-r_i = \int_{100M}^{500M} f_i(x) \cdot p(x) \, dx
-\]
+rᵢ = ∫ fᵢ(x) · p(x) dx
 
 Where:
 
-- \( f_i(x) \) = payout function of policy i  
-- \( p(x) \) = probability density function  
+- fᵢ(x) = payout function  
+- p(x) = probability density function  
 
 The resulting vector:
 
-\[
-r = (r_1, r_2, ..., r_N)
-\]
+r = (r₁, r₂, ..., rᴺ)
 
-represents the **expected risk reduction** for each policy.
+represents the expected risk reduction of each policy.
 
 ---
 
 # Constrained Binary Optimization (CBO)
 
-The insurer wants to:
+The insurer solves:
 
-\[
-\max \; r^T x
-\]
+max rᵀx  
 
-Subject to:
+subject to:
 
-\[
-c^T x \leq B
-\]
+cᵀx ≤ B  
 
 Where:
 
-- \( r \) = expected payout vector
-- \( c \) = premium cost vector
-- \( B \) = total budget
+- r = expected payout vector  
+- c = premium cost vector  
+- B = total budget  
 
-This is a **0-1 knapsack-type constrained optimization problem**.
+This is a 0-1 knapsack-type constrained optimization problem.
 
 ---
 
 # From CBO to QUBO
 
-Quantum algorithms like QAOA require an **Unconstrained Binary Optimization (UBO)** form.
+Quantum algorithms like QAOA require an unconstrained formulation.
 
-We convert the constrained problem into an unconstrained one by adding a quadratic penalty term:
+We convert the constrained problem by introducing a quadratic penalty:
 
-\[
-\min \; -r^T x + \lambda (c^T x - B)^2
-\]
+min −rᵀx + λ (cᵀx − B)²
 
 Where:
 
-- \( \lambda \) = penalty coefficient enforcing budget constraint
+- λ = penalty coefficient enforcing the budget constraint  
 
-This produces a QUBO matrix:
+This produces the QUBO form:
 
-\[
-E(x) = x^T Q x
-\]
+E(x) = xᵀ Q x
 
 ---
 
@@ -163,21 +147,15 @@ E(x) = x^T Q x
 
 To run QAOA, we convert binary variables:
 
-\[
-x_i = \frac{1 - z_i}{2}
-\]
+xᵢ = (1 − zᵢ) / 2  
 
 Where:
 
-\[
-z_i \in \{-1, +1\}
-\]
+zᵢ ∈ {−1, +1}
 
 This yields an Ising Hamiltonian:
 
-\[
-H = \sum_{i<j} J_{ij} Z_i Z_j + \sum_i h_i Z_i + \text{offset}
-\]
+H = Σ_{i<j} Jᵢⱼ Zᵢ Zⱼ + Σᵢ hᵢ Zᵢ + offset
 
 Which can be directly implemented in a quantum circuit.
 
@@ -187,20 +165,20 @@ Which can be directly implemented in a quantum circuit.
 
 ## Classical Solvers
 
-- Brute Force (exact, exponential complexity)
-- Greedy heuristic (O(N log N))
-- Simulated Annealing (approximate, stochastic)
+- **Brute Force** (exact, exponential complexity O(2ᴺ))  
+- **Greedy heuristic** (O(N log N))  
+- **Simulated Annealing** (O(iterations × N))  
 
 ## Quantum Solver
 
-- QAOA (Quantum Approximate Optimization Algorithm)
+- **QAOA (Quantum Approximate Optimization Algorithm)**  
 
 We benchmark:
 
-- Solution quality
-- Runtime scaling
-- Approximation ratio
-- Sensitivity to circuit depth p
+- Solution quality  
+- Runtime scaling  
+- Approximation ratio  
+- Sensitivity to circuit depth p  
 
 ---
 
@@ -208,16 +186,217 @@ We benchmark:
 
 We compare classical and quantum approaches across increasing values of N.
 
-- Brute force scales exponentially.
-- Greedy scales approximately O(N log N).
-- Simulated Annealing scales approximately O(iterations × N).
-- QAOA runtime depends on:
-  - Circuit depth p
-  - Number of optimizer evaluations
-  - Shot count
+Expected scaling:
+
+- Brute force → exponential  
+- Greedy → ~ O(N log N)  
+- Simulated Annealing → ~ O(kN)  
+- QAOA → depends on:
+  - Circuit depth p  
+  - Classical optimizer iterations  
+  - Number of measurement shots  
 
 The framework allows direct runtime and solution quality comparison.
 
+# Reinsurance Allocation Optimization
+
+We study the **Reinsurance Allocation Optimization** problem.
+
+An insurer must decide which reinsurance contracts to purchase in order to reduce exposure to catastrophic losses while respecting a strict budget constraint.
+
+This project reformulates the problem as a **Constrained Binary Optimization (CBO)** problem, then converts it into a **Quadratic Unconstrained Binary Optimization (QUBO)** model to solve it using both classical algorithms and quantum-inspired methods (QAOA).
+
+---
+
+# Problem Description
+
+The insurer faces multiple potential catastrophic loss scenarios, each associated with a quantified financial loss.
+
+To mitigate extreme tail risks, the company can purchase reinsurance contracts.
+
+Each contract:
+
+- Reduces exposure to large losses  
+- Has a fixed premium cost  
+- Is either purchased or not (binary decision)  
+
+Because the insurer operates under a limited reinsurance budget, it cannot purchase all contracts. Therefore, it must select an optimal subset that maximizes expected risk reduction while respecting the budget constraint.
+
+We assume:
+
+- Binary decision variables  
+- Linear expected value aggregation  
+- Budget constraint enforced via penalty in the QUBO formulation  
+
+---
+
+# Decision Variables
+
+We define binary decision variables:
+
+xᵢ ∈ {0,1}
+
+- xᵢ = 1 → contract i is purchased  
+- xᵢ = 0 → contract i is not purchased  
+
+If there are **N contracts**, the solution vector is:
+
+x ∈ {0,1}ᴺ
+
+In the quantum formulation, the number of qubits required is equal to **N**.
+
+---
+
+# Risk Assessment & Dataset
+
+We use the **Natural Disasters Emergency Events Database**.
+
+Each record contains:
+
+- Country  
+- Year  
+- Number of disaster occurrences  
+- Total loss (inflation-adjusted USD)  
+
+We filter the dataset by:
+
+- European countries  
+- Weather-related disasters  
+- Loss per event between 100M and 500M USD  
+
+From the filtered dataset:
+
+1. We compute a histogram of event losses  
+2. Convert it into a probability density function (PDF)  
+3. Estimate the annual expected frequency of catastrophic events  
+
+We assume only a fraction of total events impact our insurer portfolio, leading to an adjusted PDF used in expected loss calculations.
+
+---
+
+# Modeling Reinsurance Policies
+
+Each policy is modeled using:
+
+- Threshold Tᵢ  
+- Coverage proportion pᵢ  
+- Premium cost cᵢ  
+
+The payout behaves as follows:
+
+- If loss < Tᵢ → full coverage  
+- If loss ≥ Tᵢ → proportional coverage  
+- Outside [100M, 500M] → no payout  
+
+The expected payout for policy i is:
+
+rᵢ = ∫ fᵢ(x) · p(x) dx
+
+Where:
+
+- fᵢ(x) = payout function  
+- p(x) = probability density function  
+
+The resulting vector:
+
+r = (r₁, r₂, ..., rᴺ)
+
+represents the expected risk reduction of each policy.
+
+---
+
+# Constrained Binary Optimization (CBO)
+
+The insurer solves:
+
+max rᵀx  
+
+subject to:
+
+cᵀx ≤ B  
+
+Where:
+
+- r = expected payout vector  
+- c = premium cost vector  
+- B = total budget  
+
+This is a 0-1 knapsack-type constrained optimization problem.
+
+---
+
+# From CBO to QUBO
+
+Quantum algorithms like QAOA require an unconstrained formulation.
+
+We convert the constrained problem by introducing a quadratic penalty:
+
+min −rᵀx + λ (cᵀx − B)²
+
+Where:
+
+- λ = penalty coefficient enforcing the budget constraint  
+
+This produces the QUBO form:
+
+E(x) = xᵀ Q x
+
+---
+
+# QUBO → Ising Mapping
+
+To run QAOA, we convert binary variables:
+
+xᵢ = (1 − zᵢ) / 2  
+
+Where:
+
+zᵢ ∈ {−1, +1}
+
+This yields an Ising Hamiltonian:
+
+H = Σ_{i<j} Jᵢⱼ Zᵢ Zⱼ + Σᵢ hᵢ Zᵢ + offset
+
+Which can be directly implemented in a quantum circuit.
+
+---
+
+# Solvers Implemented
+
+## Classical Solvers
+
+- **Brute Force** (exact, exponential complexity O(2ᴺ))  
+- **Greedy heuristic** (O(N log N))  
+- **Simulated Annealing** (O(iterations × N))  
+
+## Quantum Solver
+
+- **QAOA (Quantum Approximate Optimization Algorithm)**  
+
+We benchmark:
+
+- Solution quality  
+- Runtime scaling  
+- Approximation ratio  
+- Sensitivity to circuit depth p  
+
+---
+
+# Benchmarking
+
+We compare classical and quantum approaches across increasing values of N.
+
+Expected scaling:
+
+- Brute force → exponential  
+- Greedy → ~ O(N log N)  
+- Simulated Annealing → ~ O(kN)  
+- QAOA → depends on:
+  - Circuit depth p  
+  - Classical optimizer iterations  
+  - Number of measurement shots  
+
+The framework allows direct runtime and solution quality comparison.
 
 ---
 
@@ -225,10 +404,10 @@ The framework allows direct runtime and solution quality comparison.
 
 We successfully:
 
-- Modeled a real-world insurance risk allocation problem
-- Derived expected risk values from historical catastrophe data
-- Formulated the problem as QUBO
-- Implemented both classical and quantum-inspired solvers
-- Benchmarked performance and scalability
+- Modeled a real-world insurance risk allocation problem  
+- Derived expected risk values from historical catastrophe data  
+- Formulated the problem as a QUBO  
+- Implemented both classical and quantum-inspired solvers  
+- Benchmarked performance and scalability  
 
 This project demonstrates how financial risk management problems can be mapped to quantum-ready optimization frameworks.
