@@ -37,7 +37,7 @@ for N in Ns:
     props = np.random.uniform(0,1, N)
     thresholds =  np.random.uniform(2e8, 5e8, N)
     premiums =  np.random.uniform(1e6, 2e6, N)
-    r = - generate_N(N, props, thresholds, premiums)
+    r =  generate_N(N, props, thresholds, premiums)
 
     start = time.perf_counter()
     x, score = brute_force(r, premiums, total_budget)
