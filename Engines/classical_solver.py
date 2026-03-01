@@ -104,132 +104,119 @@ def brute_force(N, r, premiums, total_budget):
 # ---------------------------------------------------------------------------
 
 def simulated_annealing(
-    data: ReinsuranceDataset,
-    T_init: float   = 100.0,
-    T_min: float    = 1e-3,
-    cooling: float  = 0.95,
-    max_iter: int   = 10_000,
-    lambda_penalty: float = 5.0,
-    seed: int = 123,
-) -> SolverResult:
+    N,
+    r,
+    premiums,
+    total_budget,
+    T_init=100.0,
+    T_min=1e-3,
+    cooling=0.95,
+    max_iter=10000,
+    lambda_penalty=5.0,
+    seed=123,
+):
     """
-    Simulated Annealing (SA) for the constrained binary knapsack.
+    Simulated Annealing for:
 
-    The constraint Σ c_i x_i ≤ B is enforced via a soft penalty term in
-    the objective:
+    max r^T x
+    s.t. premiums^T x ≤ total_budget
 
-        f(x) = Σ r_i x_i  −  λ · max(0, Σ c_i x_i − B)²
-
-    SA explores the solution space by randomly flipping single bits
-    (neighbours) and accepts worse moves with probability exp(-Δ/T).
-    The temperature T is cooled exponentially each iteration.
-
-    Parameters
-    ----------
-    T_init         : initial temperature
-    T_min          : stop when temperature drops below this value
-    cooling        : multiplicative cooling factor (0 < cooling < 1)
-    max_iter       : maximum number of SA steps
-    lambda_penalty : penalty weight for constraint violation
-    seed           : random seed for reproducibility
-
-    Returns
-    -------
-    SolverResult with the best feasible solution found.
+    Uses soft penalty:
+    f(x) = r^T x − λ * max(0, premiums^T x − B)^2
     """
-    t0 = time.perf_counter()
+
+    r = np.array(r, dtype=float)
+    premiums = np.array(premiums, dtype=float)
+
     rng = random.Random(seed)
-    n   = data.n
 
-    # ── Penalised objective (higher = better) ─────────────────────────────
-    def objective(x: np.ndarray) -> float:
-        cost       = float(data.costs @ x)
-        risk       = float(data.risks @ x)
-        violation  = max(0.0, cost - data.budget)
-        return risk - lambda_penalty * violation ** 2
+    # Penalised objective (higher is better)
+    def objective(x):
+        cost = premiums @ x
+        risk = r @ x
+        violation = max(0.0, cost - total_budget)
+        return risk - lambda_penalty * violation**2
 
-    # ── Initialise at a random feasible point ─────────────────────────────
-    x_cur = np.zeros(n, dtype=float)
-    # Greedily add random items while feasible
-    indices = list(range(n))
+    # --- Initial feasible solution ---
+    x_cur = np.zeros(N)
+    indices = list(range(N))
     rng.shuffle(indices)
+
     for i in indices:
-        if data.costs[i] + float(data.costs @ x_cur) <= data.budget:
-            x_cur[i] = 1.0
+        if premiums[i] + premiums @ x_cur <= total_budget:
+            x_cur[i] = 1
 
     f_cur = objective(x_cur)
 
-    # Track the best *feasible* solution separately
-    best_x   = x_cur.copy()
-    best_f   = f_cur if data.cost_of("".join(map(str, x_cur.astype(int)))) <= data.budget else -np.inf
+    # Track best feasible solution
+    best_x = x_cur.copy()
+    best_f = f_cur if premiums @ best_x <= total_budget else -np.inf
 
     T = T_init
 
     for _ in range(max_iter):
+
         if T < T_min:
             break
 
-        # ── Generate neighbour by flipping a random bit ───────────────────
-        flip_idx  = rng.randint(0, n - 1)
-        x_new     = x_cur.copy()
-        x_new[flip_idx] = 1.0 - x_new[flip_idx]   # flip 0↔1
+    # --- Flip random bit ---
+        flip_idx = rng.randint(0, N - 1)
+        x_new = x_cur.copy()
+        x_new[flip_idx] = 1 - x_new[flip_idx]
 
         f_new = objective(x_new)
         delta = f_new - f_cur
 
-        # ── Metropolis acceptance criterion ───────────────────────────────
+        # --- Metropolis criterion ---
         if delta > 0 or rng.random() < math.exp(delta / T):
             x_cur = x_new
             f_cur = f_new
 
-            # Update best feasible if this state is better
-            bs = "".join(map(str, x_cur.astype(int)))
-            if data.is_feasible(bs) and f_cur > best_f:
+        # Update best feasible
+            if premiums @ x_cur <= total_budget and f_cur > best_f:
                 best_f = f_cur
                 best_x = x_cur.copy()
 
-        T *= cooling   # cool the temperature
+        T *= cooling
 
-    best_bs = "".join(map(str, best_x.astype(int)))
-    return _make_result("SimulatedAnnealing", best_bs, data, t0)
+    best_score = r @ best_x
+
+    return best_x, best_score
 
 
 # ---------------------------------------------------------------------------
 # 3. Greedy Heuristic
 # ---------------------------------------------------------------------------
 
-def greedy(data: ReinsuranceDataset) -> SolverResult:
+def greedy(N, r, premiums, total_budget):
     """
-    Greedy heuristic based on the risk-to-cost efficiency ratio.
-
-    Algorithm:
-      1. Sort protections in descending order of r_i / c_i
-      2. Select each protection if it fits within the remaining budget
-
-    This is the classical fractional-knapsack greedy, applied to the 0/1
-    variant.  It runs in O(n log n) but is NOT guaranteed to be optimal.
-
     Returns
-    -------
-    SolverResult (feasible by construction, but possibly suboptimal).
+    x : np.ndarray
+    Selected binary vector
+    total_risk : float
+    Achieved objective value
     """
-    t0 = time.perf_counter()
-    n  = data.n
 
-    # Compute efficiency ratios and sort
-    ratios  = data.risks / data.costs               # r_i / c_i
-    order   = np.argsort(-ratios)                   # descending
+    r = np.array(r, dtype=float)
+    premiums = np.array(premiums, dtype=float)
 
-    x        = np.zeros(n, dtype=float)
-    remaining = data.budget
+    # Compute efficiency ratio r_i / c_i
+    ratios = r / premiums
+
+    # Sort indices in descending order of ratio
+    order = np.argsort(-ratios)
+
+    x = np.zeros(N)
+    remaining_budget = total_budget
 
     for i in order:
-        if data.costs[i] <= remaining:
-            x[i]      = 1.0
-            remaining -= data.costs[i]
+        if premiums[i] <= remaining_budget:
+            x[i] = 1
+            remaining_budget -= premiums[i]
 
-    best_bs = "".join(map(str, x.astype(int)))
-    return _make_result("Greedy", best_bs, data, t0)
+    total_risk = r @ x
+
+    return x, total_risk
 
 
 # ---------------------------------------------------------------------------
