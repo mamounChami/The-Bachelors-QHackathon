@@ -32,4 +32,4 @@ def generate_N(N, props, thresholds, premiums):
         payment = generate_payment(int_threshold, prop)
         r_values[0, i] = payment - premium
     
-    return r_values, expected_loss()
+    return r_values
