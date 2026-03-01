@@ -198,38 +198,35 @@ def simulated_annealing(
 # 3. Greedy Heuristic
 # ---------------------------------------------------------------------------
 
-def greedy(data: ReinsuranceDataset) -> SolverResult:
+def greedy(N, r, premiums, total_budget):
     """
-    Greedy heuristic based on the risk-to-cost efficiency ratio.
-
-    Algorithm:
-      1. Sort protections in descending order of r_i / c_i
-      2. Select each protection if it fits within the remaining budget
-
-    This is the classical fractional-knapsack greedy, applied to the 0/1
-    variant.  It runs in O(n log n) but is NOT guaranteed to be optimal.
-
     Returns
-    -------
-    SolverResult (feasible by construction, but possibly suboptimal).
+    x : np.ndarray
+    Selected binary vector
+    total_risk : float
+    Achieved objective value
     """
-    t0 = time.perf_counter()
-    n  = data.n
 
-    # Compute efficiency ratios and sort
-    ratios  = data.risks / data.costs               # r_i / c_i
-    order   = np.argsort(-ratios)                   # descending
+    r = np.array(r, dtype=float)
+    premiums = np.array(premiums, dtype=float)
 
-    x        = np.zeros(n, dtype=float)
-    remaining = data.budget
+    # Compute efficiency ratio r_i / c_i
+    ratios = r / premiums
+
+    # Sort indices in descending order of ratio
+    order = np.argsort(-ratios)
+
+    x = np.zeros(N)
+    remaining_budget = total_budget
 
     for i in order:
-        if data.costs[i] <= remaining:
-            x[i]      = 1.0
-            remaining -= data.costs[i]
+        if premiums[i] <= remaining_budget:
+            x[i] = 1
+            remaining_budget -= premiums[i]
 
-    best_bs = "".join(map(str, x.astype(int)))
-    return _make_result("Greedy", best_bs, data, t0)
+    total_risk = r @ x
+
+    return x, total_risk
 
 
 # ---------------------------------------------------------------------------
