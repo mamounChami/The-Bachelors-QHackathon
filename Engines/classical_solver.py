@@ -70,34 +70,41 @@ def _make_result(
 import numpy as np
 import time
 
-def brute_force(N, r, premiums, total_budget):
-
-    start = time.time()
-
-    best_score = -np.inf
-    best_x = None
-
-    # iterate over all 2^N combinations
-    for i in range(2 ** N):
-
-        # convert integer to binary vector of length N
-        x = np.array(list(np.binary_repr(i, width=N)), dtype=int)
-
-        # compute total cost
-        total_cost = np.dot(premiums, x)
-
-        # check budget constraint
-        if total_cost <= total_budget:
-
-            score = np.dot(r, x)
-
-            if score > best_score:
-                best_score = score
-                best_x = x
-
-    runtime = time.time() - start
-
-    return best_x, best_score, runtime
+def brute_force(r_values, premiums, total_budget):
+    N = r_values.shape[1]
+    
+    # 1. Generate all 2^N - 1 combinations
+    numbers = np.arange(1, 2**N, dtype=np.uint32)
+    combinations = ((numbers[:, None] & (1 << np.arange(N)[::-1])) > 0).astype(int).T
+    
+    # 2. Calculate total profit and total cost for EVERY combination
+    all_profits = np.dot(r_values, combinations).flatten()
+    all_costs = np.dot(premiums, combinations).flatten()
+    
+    # 3. Filter combinations that are over budget
+    valid_mask = all_costs <= total_budget
+    
+    if not np.any(valid_mask):
+        return None, "No valid combination within budget", 0
+    
+    # 4. Find the combination with the highest profit
+    best_relative_idx = np.argmax(all_profits[valid_mask])
+    original_idx = np.where(valid_mask)[0][best_relative_idx]
+    
+    best_combination = combinations[:, original_idx]
+    best_profit = all_profits[original_idx]
+    best_cost = all_costs[original_idx]
+    
+    # Identify which project indices were chosen (1-based for readability)
+    chosen_projects = np.where(best_combination == 1)[0]
+    
+    print(f"--- Optimization Result ---")
+    print(f"Projects Selected: {chosen_projects}")
+    print(f"Total Profit: {best_profit:.2f}")
+    print(f"Budget Used: {best_cost:.2f} / {total_budget}")
+    print(f"Remaining Budget: {total_budget - best_cost:.2f}")
+    
+    return best_combination, best_profit
 
 # ---------------------------------------------------------------------------
 # 2. Simulated Annealing
