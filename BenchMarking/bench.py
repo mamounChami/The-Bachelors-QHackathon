@@ -1,12 +1,10 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
-
-def compute_r_values(N):
-    return 0
-
-def compute_r_values_quantum(N):
-    return 0
+from DataSet.generate_N import generate_N
+from Engines.classical_solver import (
+    brute_force, simulated_annealing, greedy,
+)
 
 # ------------------------------------------------------
 # BENCHMARK
@@ -21,22 +19,25 @@ runtimes_classical = []
 runtimes_quantum = []
 
 for N in Ns:
-
+    # POV : insured, not reinsurer 
     # ----- Classical -----
     start = time.perf_counter()
-    r_classical = compute_r_values(N)
+    props = np.random.uniform(N, 0,1)
+    thresholds =  np.random.uniform(N, 2e8, 5e8)
+    premiums =  np.random.uniform(N, 1e6, 2e6)
+
+    r = - generate_N(N, props, thresholds, premiums)
     end = time.perf_counter()
 
     runtimes_classical.append(end - start)
-    mean_scores_classical.append(np.mean(r_classical))
+    mean_scores_classical.append(np.mean(r))
 
     # ----- Quantum -----
     start = time.perf_counter()
-    r_quantum = compute_r_values_quantum(N)
     end = time.perf_counter()
 
     runtimes_quantum.append(end - start)
-    mean_scores_quantum.append(np.mean(r_quantum))
+    mean_scores_quantum.append(np.mean(r))
 
 print("Benchmark complete.")
 
