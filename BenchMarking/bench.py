@@ -1,6 +1,13 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+import sys
+import os
+
+# Get the path of the parent directory (The-Bachelors-QHackathon)
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 from DataSet.generate_N import generate_N
 from Engines.classical_solver import (
     brute_force, simulated_annealing, greedy,
@@ -22,9 +29,9 @@ for N in Ns:
     # POV : insured, not reinsurer 
     # ----- Classical -----
     start = time.perf_counter()
-    props = np.random.uniform(N, 0,1)
-    thresholds =  np.random.uniform(N, 2e8, 5e8)
-    premiums =  np.random.uniform(N, 1e6, 2e6)
+    props = np.random.uniform(0,1, N)
+    thresholds =  np.random.uniform(2e8, 5e8, N)
+    premiums =  np.random.uniform(1e6, 2e6, N)
 
     r = - generate_N(N, props, thresholds, premiums)
     end = time.perf_counter()
